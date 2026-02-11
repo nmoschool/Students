@@ -191,7 +191,6 @@
                 </div>
                 <h2 style="text-align:center; margin-top:20px; font-size:1.7em; color:#fff; position: relative; z-index: 2;">
                     مستعرض ملفات مدرسة تحفيظ القرآن بالبجادية 
-                    <br><span style="font-size: 0.8em; opacity: 0.9;"></span>
                 </h2>
             </div>
 
@@ -353,7 +352,6 @@
         }
 
         async function openFile(name, url) {
-            // إذا كان الملف رابطاً تعليمياً
             if (name.endsWith('.url')) {
                 try {
                     const response = await fetch(url);
@@ -409,14 +407,13 @@
             const url = document.getElementById('linkUrlInput').value.trim();
             if(!name || !url) { alert("يرجى تعبئة جميع الحقول"); return; }
 
-            // تخزين الرابط كملف نصي ببادئة القسم
             const fileName = `[روابط تعليمية] ${name}.url`;
             const content = btoa(url); 
             const status = document.getElementById('upload-status');
             status.innerHTML = '⏳ جاري الحفظ...';
 
             try {
-                const res = await fetch(`https://api.github.com/repos/${CONFIG.username}/${CONFIG.repo}/contents/${CONFIG.path}/${fileName}`, {
+                const res = await fetch(`https://api.github.com/repos/${CONFIG.username}/${CONFIG.repo}/contents/${CONFIG.path}/${encodeURIComponent(fileName)}`, {
                     method: 'PUT', headers: { 'Authorization': `token ${getStoredToken()}` },
                     body: JSON.stringify({ message: `Add Link: ${name}`, content, branch: CONFIG.branch })
                 });
@@ -442,7 +439,7 @@
 
         function openDeleteModal(e, name, sha) { e.stopPropagation(); deleteTarget = { name, sha }; document.getElementById('deleteMsg').innerText = cleanFileName(name); openModal('deleteModal'); }
         async function executeDelete() {
-            const res = await fetch(`https://api.github.com/repos/${CONFIG.username}/${CONFIG.repo}/contents/${CONFIG.path}/${deleteTarget.name}`, {
+            const res = await fetch(`https://api.github.com/repos/${CONFIG.username}/${CONFIG.repo}/contents/${CONFIG.path}/${encodeURIComponent(deleteTarget.name)}`, {
                 method: 'DELETE', headers: { 'Authorization': `token ${getStoredToken()}` },
                 body: JSON.stringify({ message: `Delete`, sha: deleteTarget.sha, branch: CONFIG.branch })
             });
@@ -458,12 +455,12 @@
             reader.readAsDataURL(blob);
             reader.onloadend = async () => {
                 const content = reader.result.split(',')[1];
-                const putRes = await fetch(`https://api.github.com/repos/${CONFIG.username}/${CONFIG.repo}/contents/${CONFIG.path}/${newN}`, {
+                const putRes = await fetch(`https://api.github.com/repos/${CONFIG.username}/${CONFIG.repo}/contents/${CONFIG.path}/${encodeURIComponent(newN)}`, {
                     method: 'PUT', headers: { 'Authorization': `token ${getStoredToken()}` },
                     body: JSON.stringify({ message: `Rename`, content, branch: CONFIG.branch })
                 });
                 if (putRes.ok) {
-                    await fetch(`https://api.github.com/repos/${CONFIG.username}/${CONFIG.repo}/contents/${CONFIG.path}/${renameTarget.name}`, {
+                    await fetch(`https://api.github.com/repos/${CONFIG.username}/${CONFIG.repo}/contents/${CONFIG.path}/${encodeURIComponent(renameTarget.name)}`, {
                         method: 'DELETE', headers: { 'Authorization': `token ${getStoredToken()}` },
                         body: JSON.stringify({ message: `Cleanup`, sha: renameTarget.sha, branch: CONFIG.branch })
                     });
@@ -482,19 +479,43 @@
             closeModal('moveModal');
         }
 
+        // --- التعديل المدمج لرفع الملفات ---
         document.getElementById('upload-input').addEventListener('change', async (e) => {
             const file = e.target.files[0]; if (!file) return;
             const status = document.getElementById('upload-status');
             status.innerHTML = '⏳ جاري الرفع...';
-            const reader = new FileReader(); reader.readAsDataURL(file);
+
+            const existingFile = allFiles.find(f => f.name === file.name);
+            const sha = existingFile ? existingFile.sha : null;
+
+            const reader = new FileReader();
+            reader.readAsDataURL(file);
             reader.onload = async () => {
-                const content = reader.result.split(',')[1];
-                const res = await fetch(`https://api.github.com/repos/${CONFIG.username}/${CONFIG.repo}/contents/${CONFIG.path}/${file.name}`, {
-                    method: 'PUT', headers: { 'Authorization': `token ${getStoredToken()}` },
-                    body: JSON.stringify({ message: `Upload`, content, branch: CONFIG.branch })
-                });
-                if (res.ok) { status.innerHTML = "✅ تم الرفع"; loadFromGithub(); }
-                else { status.innerHTML = "❌ فشل الرفع"; }
+                try {
+                    const content = reader.result.split(',')[1];
+                    const bodyData = { 
+                        message: `Upload: ${file.name}`, 
+                        content: content, 
+                        branch: CONFIG.branch 
+                    };
+                    if (sha) bodyData.sha = sha;
+
+                    const res = await fetch(`https://api.github.com/repos/${CONFIG.username}/${CONFIG.repo}/contents/${CONFIG.path}/${encodeURIComponent(file.name)}`, {
+                        method: 'PUT',
+                        headers: { 'Authorization': `token ${getStoredToken()}` },
+                        body: JSON.stringify(bodyData)
+                    });
+
+                    if (res.ok) { 
+                        status.innerHTML = "✅ تم الرفع بنجاح"; 
+                        loadFromGithub(); 
+                    } else {
+                        const err = await res.json();
+                        status.innerHTML = `❌ فشل: ${err.message}`;
+                    }
+                } catch (error) {
+                    status.innerHTML = "❌ خطأ في الاتصال";
+                }
             };
         });
 
